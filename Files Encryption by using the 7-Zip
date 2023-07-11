@@ -1,0 +1,62 @@
+# Define path for input and the encryption password
+$rootPath = 'C:\path\to\your\directory'
+$encryptionPassword = "YourSecretPassword"
+
+# 7zip executable path (update this if necessary)
+$7zipPath = "C:\Program Files\7-Zip\7z.exe"
+
+# Compression methods
+$compressionMethods = @('LZMA', 'LZMA2', 'PPMd', 'BZip2', 'Deflate')
+
+# Function to encrypt files and folders recursively
+function Encrypt-FileOrFolder {
+param (
+[Parameter(Mandatory=$true)]
+[string]$path,
+[Parameter(Mandatory=$true)]
+[string]$compressionMethod
+)
+
+# Check if the path is a file
+if (Test-Path -Path $path -PathType Leaf) {
+# Encrypt the file
+Encrypt-File $path $compressionMethod
+}
+else {
+# Get the child items (files and folders)
+$items = Get-ChildItem -Path $path -Recurse
+
+# Loop through each item
+foreach ($item in $items) {
+# Check if the item is a file
+if ($item.PSIsContainer -eq $false) {
+# Encrypt the file
+Encrypt-File $item.FullName $compressionMethod
+}
+}
+}
+}
+
+# Function to encrypt a file
+function Encrypt-File {
+param (
+[Parameter(Mandatory=$true)]
+[string]$filePath,
+[Parameter(Mandatory=$true)]
+[string]$compressionMethod
+)
+
+# Define the encrypted output file path
+$encryptedFilePath = $filePath + "." + $compressionMethod + ".7z"
+
+# Encrypt the file using 7-Zip with AES-256 and the specified compression method
+& $7zipPath a -t7z -mx=9 -mhe=on -p$encryptionPassword "-m0=$compressionMethod" $encryptedFilePath $filePath
+
+# If you wish to delete the original file after encryption, uncomment the line below
+# Remove-Item -Path $filePath
+}
+
+# Call the function to start the encryption with each compression method
+foreach ($method in $compressionMethods) {
+Encrypt-FileOrFolder -path $rootPath -compressionMethod $method
+}
