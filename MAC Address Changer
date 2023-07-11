@@ -1,0 +1,132 @@
+# Function to generate a random MAC Address
+function Generate-MAC {
+   $mac = "02"
+   for ($i = 0; $i -lt 5; $i++) {
+       $mac += "{0:X2}" -f (Get-Random -Minimum 0 -Maximum 256)
+   }
+   return $mac
+}
+ 
+# Function to validate MAC Address
+function IsValid-MAC {
+   param([string]$mac)
+   return $mac -match "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+}
+ 
+# Define output directory and create it if it doesn't exist
+$outputDir = "C:\MAC Address changes"
+if (!(Test-Path -Path $outputDir)) {
+   New-Item -ItemType Directory -Path $outputDir | Out-Null
+}
+ 
+# User prompt function
+function UserPrompt {
+   param([string]$message, [string]$yesMessage, [string]$noMessage, [scriptblock]$yesScript, [scriptblock]$noScript)
+ 
+   do {
+       $input = Read-Host "$message (yes/no)"
+       if ($input -eq "yes") {
+           Write-Host $yesMessage
+           &$yesScript
+           return $true
+       } elseif ($input -eq "no") {
+           Write-Host $noMessage
+           &$noScript
+           return $false
+       } else {
+           Write-Host "Invalid input. Please enter 'yes' or 'no'."
+       }
+   } while ($true)
+}
+ 
+# Main function
+function Main {
+   Write-Host "Welcome to the MAC address changer!"
+ 
+   do {
+       try {
+           # Get all network adapters
+           $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+       } catch {
+           Write-Host "Failed to get network adapters. Please check your network configuration and try again."
+           continue
+       }
+ 
+       # Show all network adapters to the user
+       Write-Host "`nAvailable network adapters:"
+       $adapters | Format-Table -Property Name, MacAddress, ifIndex
+ 
+       # Ask the user to select a network adapter
+       $adapterIndex = Read-Host "`nPlease enter the ifIndex of the adapter you want to change the MAC address for"
+       $adapter = $adapters | Where-Object { $_.ifIndex -eq $adapterIndex }
+ 
+       if (!$adapter) {
+           Write-Host "Invalid ifIndex. Please enter a valid ifIndex."
+           continue
+       }
+ 
+       # Confirm with the user before proceeding
+       $proceed = UserPrompt "You have selected the adapter $($adapter.Name) with the MAC address $($adapter.MacAddress). Do you want to proceed?" "Proceeding with the operation." "Operation cancelled." {} {}
+ 
+       if ($proceed) {
+           # Ask the user to input a specific MAC address or generate a random one
+           do {
+               $macOption = Read-Host "`nDo you want to input a specific MAC address or generate a random one? (input/random)"
+               if ($macOption -eq "input") {
+                   do {
+                       $newMacAddress = Read-Host "Enter the new MAC address"
+                       if (!(IsValid-MAC $newMacAddress)) {
+                           Write-Host "Invalid MAC address. Please enter a valid MAC address."
+                       }
+                   } while (!(IsValid-MAC $newMacAddress))
+               } elseif ($macOption -eq "random") {
+                   $newMacAddress = Generate-MAC
+               } else {
+                   Write-Host "Invalid input. Please enter 'input' or 'random'."
+                   continue
+               }
+ 
+               # Confirm with the user before changing the MAC address
+               $proceed = UserPrompt "Do you want to change the MAC address of adapter $($adapter.Name) from $($adapter.MacAddress) to $newMacAddress?" "Changing the MAC address..." "Operation cancelled." {} {}
+ 
+               if ($proceed) {
+                   # Attempt to change the MAC address
+                   try {
+                       # Change the 'NetworkAddress' property to the new MAC address
+                       Set-ItemProperty -Path $regPath -Name "NetworkAddress" -Value $newMacAddress -ErrorAction Stop
+ 
+                       # Disable and then enable the network adapter to apply changes
+                       Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+                       Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+ 
+                       # Check if the MAC address change was successful
+                       $adapter = Get-NetAdapter -Name $adapter.Name
+                       if ($adapter.MacAddress -eq $newMacAddress) {
+                           Write-Host ("Successfully changed the MAC address of adapter {0} from {1} to {2}." -f $adapter.Name, $currentMacAddress, $newMacAddress)
+                       } else {
+                           throw "Failed to change the MAC address of adapter."
+                       }
+                   } catch {
+                       Write-Host ("An error occurred while attempting to change the MAC address: {0}" -f $_.Exception.Message)
+                   }
+               }
+               
+               # Ask the user if they want to try again
+               $retry = UserPrompt "Do you want to try again?" "Restarting the operation." "Operation cancelled." {} {}
+ 
+               if (!$retry) {
+                   break
+               }
+           } while ($true)
+       }
+ 
+       # Ask the user if they want to change another MAC address
+       $another = UserPrompt "Do you want to change another MAC address?" "Restarting the operation." "Operation completed." {} {}
+ 
+       if (!$another) {
+           break
+       }
+   } while ($true)
+}
+
+Main
