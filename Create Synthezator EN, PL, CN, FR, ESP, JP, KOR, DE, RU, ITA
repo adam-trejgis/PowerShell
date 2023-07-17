@@ -1,0 +1,286 @@
+Describe and validate the script. Describe the primary components, features and functions.
+
+
+# Load necessary .NET assemblies
+Add-Type -AssemblyName System.speech, System.Windows.Forms, System.Drawing, System.IO
+
+# Create the SpeechSynthesizer object
+$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer
+
+# List of specific voices and their real language names
+$voices = [ordered]@{
+    "Microsoft Paulina Desktop" = "Polish"
+    "Microsoft Zira Desktop" = "English (United States)"
+    "Microsoft Huihui Desktop" = "Chinese (Simplified, China)"
+    "Microsoft Hortense Desktop" = "French (France)"
+    "Microsoft Helena Desktop" = "Spanish (Spain)"
+    "Microsoft Haruka Desktop" = "Japanese"
+    "Microsoft Heami Desktop" = "Korean"
+    "Microsoft Hedda Desktop" = "German (Germany)"
+    "Microsoft Irina Desktop" = "Russian"
+    "Microsoft Elsa Desktop" = "Italian (Italy)"
+}
+
+# Function to create a label
+function Create-Label ($text, $location, $size) {
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $text
+    $label.Location = $location
+    $label.Size = $size
+    return $label
+}
+
+# Function to create a button
+function Create-Button ($text, $location, $size, $onClick) {
+    $button = New-Object System.Windows.Forms.Button
+    $button.Text = $text
+    $button.Location = $location
+    $button.Size = $size
+    $button.Add_Click($onClick)
+    return $button
+}
+
+# Function to create a track bar
+function Create-TrackBar ($location, $size, $range, $tickFrequency, $value, $onValueChanged) {
+    $trackBar = New-Object System.Windows.Forms.TrackBar
+    $trackBar.Location = $location
+    $trackBar.Size = $size
+    $trackBar.SetRange($range[0], $range[1])
+    $trackBar.TickFrequency = $tickFrequency
+    $trackBar.Value = $value
+    $trackBar.Add_ValueChanged($onValueChanged)
+    return $trackBar
+}
+
+# Function to create a combo box
+function Create-ComboBox ($location, $size, $items, $selectedIndex, $onSelectedIndexChanged) {
+    $comboBox = New-Object System.Windows.Forms.ComboBox
+    $comboBox.Location = $location
+    $comboBox.Size = $size
+    $comboBox.DropDownStyle = 'DropDownList'
+    $comboBox.Items.AddRange($items)
+    $comboBox.SelectedIndex = $selectedIndex
+    $comboBox.Add_SelectedIndexChanged($onSelectedIndexChanged)
+    return $comboBox
+}
+
+# Function to write log messages
+function Write-Log ($message) {
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path 'application.log' -Value ("{0} - {1}" -f $timestamp, $message)
+}
+
+# Check if voices are available
+foreach ($voice in $voices.Keys) {
+    if (-not ($speak.GetInstalledVoices().VoiceInfo.Name -contains $voice)) {
+        $result = [System.Windows.Forms.MessageBox]::Show("Voice '$voice' is not available. Would you like to install it now?", "Voice Not Found", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+            # Code to install the voice could go here
+            # In this example, we'll just inform the user
+            [System.Windows.Forms.MessageBox]::Show("Please install the voice '$voice' manually.", "Information", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        }
+    }
+}
+
+# Create the main Form
+$form = New-Object System.Windows.Forms.Form
+$form.Size = New-Object System.Drawing.Size(1200, 600)  # Increased width from 1000 to 1200
+$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$form.Text = "Word Reader"
+
+# Add form opening event
+$form.Add_Load({
+    [System.Windows.Forms.MessageBox]::Show("Welcome to the Word Reader. Please enter the text you want to read in the provided box and select the voice.", "Welcome", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+})
+
+# Add form closing event
+$form.Add_FormClosing({
+    if ($textbox.Text.Trim() -ne "" -and $_.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
+        $dialogResult = [System.Windows.Forms.MessageBox]::Show("You have unsaved changes. Are you sure you want to close?", "Confirm Exit", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($dialogResult -eq [System.Windows.Forms.DialogResult]::No) {
+            $_.Cancel = $true
+        }
+    }
+})
+
+# Create the TextBox for user input
+$textbox = New-Object System.Windows.Forms.TextBox
+$textbox.Location = New-Object System.Drawing.Point(50, 80)
+$textbox.Size = New-Object System.Drawing.Size(1100, 100)  # Increased width from 900 to 1100
+$textbox.Multiline = $true
+$textbox.ScrollBars = 'Vertical'
+$form.Controls.Add($textbox)
+
+# Group 1: 'Read', 'Pause', 'Resume', 'Cancel', and 'Clear' buttons
+$group1 = New-Object System.Windows.Forms.GroupBox
+$group1.Text = "Playback Controls"
+$group1.Location = New-Object System.Drawing.Point(50, 200)
+$group1.Size = New-Object System.Drawing.Size(600, 60)
+$form.Controls.Add($group1)
+
+# Create the Read Button
+$readButton = Create-Button "Read" (New-Object System.Drawing.Point(10, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    if ($textbox.Text.Trim() -eq "") {
+        [System.Windows.Forms.MessageBox]::Show("Please enter some text to read.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    } else {
+        try {
+            $speak.SpeakAsync($textbox.Text)
+            $progressBar.Style = 'Marquee'
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            [System.Windows.Forms.MessageBox]::Show("An error occurred: `n`n$errorMessage", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            # Log the exception
+            Write-Log ("Error occurred while trying to read the text. Error Message: {0}" -f $errorMessage)
+        }
+    }
+}
+$group1.Controls.Add($readButton)
+
+# Create the Pause Button
+$pauseButton = Create-Button "Pause" (New-Object System.Drawing.Point(120, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    if ($speak.State -eq [System.Speech.Synthesis.SynthesizerState]::Speaking) {
+        $speak.Pause()
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("No speech is currently being played.", "Information", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+}
+$group1.Controls.Add($pauseButton)
+
+# Create the Resume Button
+$resumeButton = Create-Button "Resume" (New-Object System.Drawing.Point(230, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    if ($speak.State -eq [System.Speech.Synthesis.SynthesizerState]::Paused) {
+        $speak.Resume()
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("No speech is currently paused.", "Information", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+}
+$group1.Controls.Add($resumeButton)
+
+# Create the Cancel Button
+$cancelButton = Create-Button "Cancel" (New-Object System.Drawing.Point(340, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    $speak.SpeakAsyncCancelAll()
+    $progressBar.Style = 'Blocks'
+}
+$group1.Controls.Add($cancelButton)
+
+# Create the Clear Button
+$clearButton = Create-Button "Clear" (New-Object System.Drawing.Point(450, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    $dialogResult = [System.Windows.Forms.MessageBox]::Show("Are you sure you want to clear the text box?", "Confirm Clear", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+    if ($dialogResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+        $textbox.Clear()
+    }
+}
+$group1.Controls.Add($clearButton)
+
+# Group 2: 'Save to File' and 'Load Text File' buttons
+$group2 = New-Object System.Windows.Forms.GroupBox
+$group2.Text = "File Operations"
+$group2.Location = New-Object System.Drawing.Point(660, 200)
+$group2.Size = New-Object System.Drawing.Size(230, 60)
+$form.Controls.Add($group2)
+
+# Create the Save to File Button
+$saveButton = Create-Button "Save to File" (New-Object System.Drawing.Point(10, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    if ($textbox.Text.Trim() -eq "") {
+        [System.Windows.Forms.MessageBox]::Show("Please enter some text to save.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    } else {
+        $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+        $saveFileDialog.Filter = "WAV Audio File (*.wav)|*.wav|MP3 Audio File (*.mp3)|*.mp3"
+        $saveFileDialog.DefaultExt = "wav"
+        if ($saveFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            try {
+                $tempFile = [IO.Path]::GetTempFileName()
+                $speak.SetOutputToWaveFile($tempFile)
+                $speak.Speak($textbox.Text)
+                $speak.SetOutputToDefaultAudioDevice()
+
+                if ($saveFileDialog.FilterIndex -eq 2) {
+                    # Convert to MP3
+                    & "C:\ffmpeg\bin\ffmpeg.exe" -i $tempFile -acodec libmp3lame $saveFileDialog.FileName
+                    Remove-Item $tempFile
+                } else {
+                    Move-Item $tempFile $saveFileDialog.FileName -Force
+                }
+
+                [System.Windows.Forms.MessageBox]::Show("Audio saved successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+            }
+            catch {
+                $errorMessage = $_.Exception.Message
+                [System.Windows.Forms.MessageBox]::Show("An error occurred: `n`n$errorMessage", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                # Log the exception
+                Write-Log ("Error occurred while trying to save the text as audio. Error Message: {0}" -f $errorMessage)
+            }
+        }
+    }
+}
+$group2.Controls.Add($saveButton)
+
+# Create the Load Text File Button
+$loadButton = Create-Button "Load Text File" (New-Object System.Drawing.Point(120, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openFileDialog.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"
+    if ($openFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        try {
+            $textbox.Text = [System.IO.File]::ReadAllText($openFileDialog.FileName)
+            [System.Windows.Forms.MessageBox]::Show("File loaded successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            [System.Windows.Forms.MessageBox]::Show("An error occurred: `n`n$errorMessage", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            # Log the exception
+            Write-Log ("Error occurred while trying to load the text file. Error Message: {0}" -f $errorMessage)
+        }
+    }
+}
+$group2.Controls.Add($loadButton)
+
+# Group 3: 'Help' button
+$group3 = New-Object System.Windows.Forms.GroupBox
+$group3.Text = "Help"
+$group3.Location = New-Object System.Drawing.Point(900, 200)
+$group3.Size = New-Object System.Drawing.Size(120, 60)
+$form.Controls.Add($group3)
+
+# Create the Help Button
+$helpButton = Create-Button "Help" (New-Object System.Drawing.Point(10, 20)) (New-Object System.Drawing.Size(100, 30)) {
+    [System.Windows.Forms.MessageBox]::Show("1. Enter your text in the box. `n2. Click 'Read' to hear your text. `n3. Click 'Pause' to pause reading. `n4. Click 'Resume' to resume reading. `n5. Click 'Cancel' to stop reading. `n6. Use the 'Rate' slider to adjust how fast the text is read. `n7. Use the 'Volume' slider to adjust the volume. `n8. Use the 'Select a language' dropdown to choose a voice. `n9. Click 'Clear' to clear the text box. `n10. Click 'Save to File' to save the spoken text as an audio file. `n11. Click 'Load Text File' to load a text file into the text box.", "Help", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+}
+$group3.Controls.Add($helpButton)
+
+# Create the Progress Bar
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(50, 280)
+$progressBar.Size = New-Object System.Drawing.Size(1100, 20)  # Increased width from 900 to 1100
+$form.Controls.Add($progressBar)
+
+# Create the Rate TrackBar
+$form.Controls.Add((Create-Label "Adjust the speech rate (move slider towards '-' for slow, '+' for fast):" (New-Object System.Drawing.Point(50, 310)) (New-Object System.Drawing.Size(1100, 20))))  # Increased width from 900 to 1100
+$rateTrackBar = Create-TrackBar (New-Object System.Drawing.Point(50, 340)) (New-Object System.Drawing.Size(1100, 45)) (-10, 10) 1 $speak.Rate {  # Increased width from 900 to 1100
+    $speak.Rate = $rateTrackBar.Value
+}
+$form.Controls.Add($rateTrackBar)
+
+# Create the Volume TrackBar
+$form.Controls.Add((Create-Label "Adjust the volume (move slider towards 'L' for low, 'H' for high):" (New-Object System.Drawing.Point(50, 390)) (New-Object System.Drawing.Size(1100, 20))))  # Increased width from 900 to 1100
+$volumeTrackBar = Create-TrackBar (New-Object System.Drawing.Point(50, 420)) (New-Object System.Drawing.Size(1100, 45)) (0, 100) 10 $speak.Volume {  # Increased width from 900 to 1100
+    $speak.Volume = $volumeTrackBar.Value
+}
+$form.Controls.Add($volumeTrackBar)
+
+# Create the Voice ComboBox
+$form.Controls.Add((Create-Label "Select a language:" (New-Object System.Drawing.Point(50, 470)) (New-Object System.Drawing.Size(1100, 20))))  # Increased width from 900 to 1100
+$voiceComboBox = Create-ComboBox (New-Object System.Drawing.Point(50, 500)) (New-Object System.Drawing.Size(1100, 30)) $voices.Values 0 {  # Increased width from 900 to 1100
+    $selectedVoice = $voices.GetEnumerator() | Where-Object { $_.Value -eq $voiceComboBox.SelectedItem } | Select-Object -ExpandProperty Key
+    try {
+        $speak.SelectVoice($selectedVoice)
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Could not select the voice. Please make sure it's installed.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+}
+$form.Controls.Add($voiceComboBox)
+
+# Display the form
+$form.ShowDialog()
+
