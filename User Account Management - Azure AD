@@ -1,0 +1,335 @@
+# Ensure AzureAD module is installed
+if (!(Get-Module -ListAvailable -Name AzureAD)) {
+    Write-Output "The AzureAD module is not installed. Please install it by running 'Install-Module AzureAD' or 'Install-Module AzureADPreview' from an elevated PowerShell prompt."
+    return
+}
+
+# Import AzureAD module
+Import-Module AzureAD
+
+# Connect to Azure AD
+$tenantDomain = "<your-tenant-name>.onmicrosoft.com" # replace with your tenant domain
+$credential = Get-Credential -Message "Enter your Azure AD admin credentials"
+Connect-AzureAD -Credential $credential -Confirm:$false
+
+# Function to pause script
+function Pause {
+   Read-Host "`nPress Enter to continue..."
+}
+
+# Function to log messages
+function Log-Message {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $message
+   )
+
+   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+   $logMessage = "$timestamp - $message"
+   Write-Output $logMessage | Out-File -Append -FilePath "UserManagementLog.txt"
+   Write-Host $logMessage
+}
+
+# Function to validate username input
+function Validate-UserName {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   if ($username -notmatch "^[a-zA-Z0-9_\-]{1,20}$") {
+       Write-Host "`nUsername is not valid. It must be 1 to 20 characters long and contain only letters, numbers, underscores, and hyphens."
+       Log-Message -message "Invalid username entered: $username"
+       return $false
+   }
+   Log-Message -message "Valid username entered: $username"
+   return $true
+}
+
+# Function to validate password
+function Validate-Password {
+   param (
+       [Parameter(Mandatory=$true)]
+       [System.Security.SecureString] $password
+   )
+
+   # Convert SecureString to Plain Text
+   $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+   $PlainTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+   # List of common passwords to disallow
+   $commonPasswords = 'password123', 'qwerty', 'admin'
+
+   if ($PlainTextPassword.Length -lt 8 -or $PlainTextPassword.Length -gt 128) {
+       Write-Host "`nPassword is not valid. It must be at least 8 characters and not more than 128 characters long."
+       Log-Message -message "Invalid password entered. Length is less than 8 characters or more than 128 characters."
+       return $false
+   }
+   elseif ($PlainTextPassword -in $commonPasswords) {
+       Write-Host "`nPassword is not valid. It is too common."
+       Log-Message -message "Invalid password entered. It is too common."
+       return $false
+   }
+   elseif ($PlainTextPassword -cnotmatch '[a-z]' -or $PlainTextPassword -cnotmatch '[A-Z]' -or $PlainTextPassword -cnotmatch '[0-9]' -or $PlainTextPassword -cnotmatch '[^a-zA-Z0-9]') {
+       Write-Host "`nPassword is not valid. It must contain at least one lowercase letter, one uppercase letter, one digit, and one special character."
+       Log-Message -message "Invalid password entered. Does not meet complexity requirements."
+       return $false
+   }
+   Log-Message -message "Valid password entered."
+   return $true
+}
+
+# Function to create a user
+function Create-User {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   if (-not (Validate-UserName -username $username)) {
+       Pause
+       return
+   }
+
+   try {
+       $user = Get-AzureADUser -ObjectId "$username@$tenantDomain" -ErrorAction SilentlyContinue
+       if ($null -ne $user) {
+           Write-Host "`nUser account $username already exists."
+           Log-Message -message "Failed to create $username. User account already exists."
+           return
+       }
+   }
+   catch {
+       Write-Host "`nAn error occurred while checking if user $username exists. Error: $_"
+       Log-Message -message "Error checking if user $username exists. Error: $_"
+       return
+   }
+
+   try {
+       $password = Read-Host "`nEnter the password for the new user" -AsSecureString
+       if (-not (Validate-Password -password $password)) {
+           Pause
+           return
+       }
+
+       $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
+       $PasswordProfile.Password = $password
+       $PasswordProfile.EnforceChangePasswordPolicy = $false
+       $PasswordProfile.ForceChangePasswordNextLogin = $false
+
+       New-AzureADUser -UserPrincipalName "$username@$tenantDomain" -PasswordProfile $PasswordProfile -AccountEnabled $true -DisplayName $username -MailNickName $username
+       Write-Host "`nUser account $username created."
+       Log-Message -message "$username was created."
+   }
+   catch {
+       Write-Host "`nAn error occurred while creating user $username. Error: $_"
+       Log-Message -message "Failed to create user $username. Error: $_"
+   }
+}
+
+# Function to delete a user
+function Delete-User {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   try {
+       $user = Get-AzureADUser -ObjectId "$username@$tenantDomain" -ErrorAction SilentlyContinue
+       if ($null -eq $user) {
+           Write-Host "`nUser account $username does not exist."
+           Log-Message -message "Failed to delete $username. User account does not exist."
+           return
+       }
+   }
+   catch {
+       Write-Host "`nAn error occurred while checking if user $username exists. Error: $_"
+       Log-Message -message "Error checking if user $username exists. Error: $_"
+       return
+   }
+
+   try {
+       Remove-AzureADUser -ObjectId "$username@$tenantDomain"
+       Write-Host "`nUser account $username deleted."
+       Log-Message -message "$username was deleted."
+   }
+   catch {
+       Write-Host "`nAn error occurred while deleting user $username. Error: $_"
+       Log-Message -message "Failed to delete user $username. Error: $_"
+   }
+}
+
+# Function to enable a user
+function Enable-User {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   try {
+       $user = Get-AzureADUser -ObjectId "$username@$tenantDomain" -ErrorAction SilentlyContinue
+       if ($null -eq $user) {
+           Write-Host "`nUser account $username does not exist."
+           Log-Message -message "Failed to enable $username. User account does not exist."
+           return
+       }
+   }
+   catch {
+       Write-Host "`nAn error occurred while checking if user $username exists. Error: $_"
+       Log-Message -message "Error checking if user $username exists. Error: $_"
+       return
+   }
+
+   try {
+       Set-AzureADUser -ObjectId "$username@$tenantDomain" -AccountEnabled $true
+       Write-Host "`nUser account $username enabled."
+       Log-Message -message "$username was enabled."
+   }
+   catch {
+       Write-Host "`nAn error occurred while enabling user $username. Error: $_"
+       Log-Message -message "Failed to enable user $username. Error: $_"
+   }
+}
+
+# Function to disable a user
+function Disable-User {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   try {
+       $user = Get-AzureADUser -ObjectId "$username@$tenantDomain" -ErrorAction SilentlyContinue
+       if ($null -eq $user) {
+           Write-Host "`nUser account $username does not exist."
+           Log-Message -message "Failed to disable $username. User account does not exist."
+           return
+       }
+   }
+   catch {
+       Write-Host "`nAn error occurred while checking if user $username exists. Error: $_"
+       Log-Message -message "Error checking if user $username exists. Error: $_"
+       return
+   }
+
+   try {
+       Set-AzureADUser -ObjectId "$username@$tenantDomain" -AccountEnabled $false
+       Write-Host "`nUser account $username disabled."
+       Log-Message -message "$username was disabled."
+   }
+   catch {
+       Write-Host "`nAn error occurred while disabling user $username. Error: $_"
+       Log-Message -message "Failed to disable user $username. Error: $_"
+   }
+}
+
+# Function to change password
+function Change-Password {
+   param (
+       [Parameter(Mandatory=$true)]
+       [string] $username
+   )
+
+   try {
+       $user = Get-AzureADUser -ObjectId "$username@$tenantDomain" -ErrorAction SilentlyContinue
+       if ($null -eq $user) {
+           Write-Host "`nUser account $username does not exist."
+           Log-Message -message "Failed to change password for $username. User account does not exist."
+           return
+       }
+   }
+   catch {
+       Write-Host "`nAn error occurred while checking if user $username exists. Error: $_"
+       Log-Message -message "Error checking if user $username exists. Error: $_"
+       return
+   }
+
+   try {
+       $password = Read-Host "`nEnter the new password" -AsSecureString
+       if (-not (Validate-Password -password $password)) {
+           Pause
+           return
+       }
+
+       $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
+       $PasswordProfile.Password = $password
+       $PasswordProfile.EnforceChangePasswordPolicy = $false
+       $PasswordProfile.ForceChangePasswordNextLogin = $false
+
+       Set-AzureADUserPassword -ObjectId "$username@$tenantDomain" -PasswordProfile $PasswordProfile
+       Write-Host "`nPassword changed for user $username."
+       Log-Message -message "Password was changed for $username."
+   }
+   catch {
+       Write-Host "`nAn error occurred while changing the password for user $username. Error: $_"
+       Log-Message -message "Failed to change password for $username. Error: $_"
+   }
+}
+
+# Function to list users
+function List-Users {
+   try {
+       $users = Get-AzureADUser
+       $users | Format-Table -Property UserPrincipalName, AccountEnabled
+   }
+   catch {
+       Write-Host "`nAn error occurred while listing users. Error: $_"
+       Log-Message -message "Failed to list users. Error: $_"
+   }
+}
+
+# Main menu
+do {
+   Clear-Host
+   Write-Host "`nUser Management Menu"
+   Write-Host "1. Create User"
+   Write-Host "2. Delete User"
+   Write-Host "3. Enable User"
+   Write-Host "4. Disable User"
+   Write-Host "5. Change Password"
+   Write-Host "6. List Users"
+   Write-Host "7. Exit"
+   $choice = Read-Host "`nEnter your choice"
+
+   if ($choice -notmatch "^[1-7]$") {
+       Write-Host "`nPlease select a valid option."
+       Log-Message -message "Invalid option selected: $choice"
+       Pause
+       continue
+   }
+
+   Log-Message -message "Valid option selected: $choice"
+
+   switch ($choice) {
+       "1" {
+           $username = Read-Host "`nEnter the username to create"
+           Create-User -username $username
+           Pause
+       }
+       "2" {
+           $username = Read-Host "`nEnter the username to delete"
+           Delete-User -username $username
+           Pause
+       }
+       "3" {
+           $username = Read-Host "`nEnter the username to enable"
+           Enable-User -username $username
+           Pause
+       }
+       "4" {
+           $username = Read-Host "`nEnter the username to disable"
+           Disable-User -username $username
+           Pause
+       }
+       "5" {
+           $username = Read-Host "`nEnter the username to change password"
+           Change-Password -username $username
+           Pause
+       }
+       "6" {
+           List-Users
+           Pause
+       }
+       "7" { exit }
+   }
+} while ($true)
